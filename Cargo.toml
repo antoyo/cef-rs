@@ -1,0 +1,9 @@
+[package]
+name = "cef"
+version = "0.1.0"
+authors = ["Antoni Boucher <antoni.boucher@samsung.com>"]
+
+[dependencies]
+
+[dev-dependencies]
+gtk = "0.6.0"
