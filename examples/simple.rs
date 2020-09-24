@@ -1,6 +1,9 @@
 #![allow(non_camel_case_types)]
 
 extern crate cef;
+extern crate gdk;
+extern crate gdk_sys;
+extern crate glib;
 extern crate gtk;
 
 use std::alloc::{Layout, dealloc};
@@ -10,8 +13,18 @@ use std::mem;
 use std::process;
 use std::ptr;
 
+use gdk::Screen;
+use gdk_sys::{
+    GdkDisplay,
+    GdkScreen,
+    GdkVisual,
+    GdkWindow,
+};
+use glib::translate::ToGlibPtr;
 use gtk::{
+    ContainerExt,
     Inhibit,
+    Orientation,
     WidgetExt,
     Window,
     WindowType,
@@ -52,21 +65,82 @@ fn main() {
     settings.size = mem::size_of::<cef_settings_t>();
     unsafe { cef_initialize(&main_args, &settings, &mut app, ptr::null_mut()) };
 
-    unsafe { cef_run_message_loop() };
-    unsafe { cef_shutdown() };
-
 
     gtk::init().expect("gtk init");
 
     let window = Window::new(WindowType::Toplevel);
+
+    let vbox = gtk::Box::new(Orientation::Vertical, 0);
+    window.add(&vbox);
+    fix_default_x11_visual(&window);
     window.show_all();
 
     window.connect_delete_event(|_, _| {
-        gtk::main_quit();
+        unsafe { cef_quit_message_loop() };
+        //gtk::main_quit();
         Inhibit(false)
     });
 
+    let window = vbox.get_window();
+    let xid = unsafe { gdk_x11_window_get_xid(window.to_glib_none().0) };
+
+    let mut window_info: cef_window_info_t = unsafe { mem::zeroed() };
+    window_info.parent_window = xid;
+
+    unsafe { cef_run_message_loop() };
+    unsafe { cef_shutdown() };
+
+    // FIXME: not sure how the gtk main loop runs.
     gtk::main();
+}
+
+extern "C" {
+    fn gdk_x11_display_get_xdisplay(display: *mut GdkDisplay) -> *mut Display;
+    fn gdk_x11_screen_get_screen_number(screen: *mut GdkScreen) -> i32;
+    fn gdk_x11_visual_get_xvisual(visual: *mut GdkVisual) -> *mut Visual;
+    fn gdk_x11_window_get_xid(window: *mut GdkWindow) -> u64;
+}
+
+#[link(name="X11")]
+extern "C" {
+    fn XDefaultVisual(_2: *mut Display, _1: i32) -> *mut Visual;
+}
+
+enum Display {
+}
+
+enum XExtData {
+}
+
+#[repr(C)]
+pub struct Visual {
+    ext_data: *mut XExtData,
+    visualid: u64,
+    class: i32,
+    red_mask: u64,
+    green_mask: u64,
+    blue_mask: u64,
+    bits_per_rgb: i32,
+    map_entries: i32,
+}
+
+fn fix_default_x11_visual(window: &Window) {
+    if let Some(screen) = Screen::get_default() {
+        unsafe {
+            let visuals = screen.list_visuals();
+            let display = screen.get_display();
+            let xdisplay = gdk_x11_display_get_xdisplay(display.to_glib_none().0);
+            let screen_number = gdk_x11_screen_get_screen_number(screen.to_glib_none().0);
+            let default_xvisual = XDefaultVisual(xdisplay, screen_number);
+
+            for visual in &visuals {
+                if (*default_xvisual).visualid == (*gdk_x11_visual_get_xvisual(visual.to_glib_none().0)).visualid {
+                    window.set_visual(visual);
+                    break;
+                }
+            }
+        }
+    }
 }
 
 // Cef C API.
@@ -181,6 +255,7 @@ extern "C" {
     fn cef_initialize(args: *const cef_main_args_t, settings: *const cef_settings_t, application: *mut cef_app_t,
         windows_sandbox_info: *mut c_void) -> i32;
     fn cef_run_message_loop();
+    fn cef_quit_message_loop();
     fn cef_shutdown();
     fn cef_browser_view_create(client: *mut cef_client_t, url: *const cef_string_t,
         settings: *const cef_browser_settings_t, request_context: *mut cef_request_context_t,
@@ -524,9 +599,19 @@ struct cef_request_context_t {
     // TODO
 }
 
+type cef_window_handle_t = u64;
+
 #[repr(C)]
 struct cef_window_info_t {
-    // TODO
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    parent_window: cef_window_handle_t,
+    windowless_rendering_enabled: i32,
+    shared_texture_enabled: i32,
+    external_begin_frame_enabled: i32,
+    window: cef_window_handle_t,
 }
 
 #[repr(C)]

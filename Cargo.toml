@@ -6,4 +6,7 @@ authors = ["Antoni Boucher <antoni.boucher@samsung.com>"]
 [dependencies]
 
 [dev-dependencies]
+gdk = "0.10.0"
+gdk-sys = "0.8.0"
+glib = "0.7.1"
 gtk = "0.6.0"
